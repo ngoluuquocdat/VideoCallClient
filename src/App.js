@@ -1,7 +1,7 @@
 import logo from './logo.svg';
 import './App.css';
 import React, { Component } from 'react';
-import { Peer } from 'simple-peer';
+import { SimplePeer } from 'simple-peer';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import styled from "styled-components";
 
@@ -31,25 +31,40 @@ class App extends Component {
     receivingCall: false,
     caller: "",
     callerSignal: null,
-    callAccepted: false
+    callAccepted: false,
+    peer: {},
   }
 
   baseUrl = "https://localhost:7218";
 
   userVideo = React.createRef();
   partnerVideo = React.createRef();
-  socket = React.createRef();
+  // socket = React.createRef();
 
   componentDidMount = async() => {
     // connect to signalrtc hub
     await this.startConnectionToHub();
     // get webcam
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-      this.setState({ stream: stream });
-      if (this.userVideo.current) {
-        this.userVideo.current.srcObject = stream;
-      }
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
+      // if (this.userVideo.current) {
+      //   this.userVideo.current.srcObject = stream;
+      // } 
+      this.setState(
+        { stream: stream },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          } 
+        }
+      );
     });
+  }
+
+  componentWillUnmount = () => {
+    const peer = this.state.peer;
+    if(peer) {
+      this.closePeer();
+    }
   }
 
   startConnectionToHub = async (currentUser) => {
@@ -69,6 +84,7 @@ class App extends Component {
         })
 
         connection.on("Hey", (fromUser, signal) => {
+          console.log("Hey on client invoked")
           this.setState({
             receivingCall: true,
             caller: fromUser,
@@ -76,7 +92,17 @@ class App extends Component {
           });
         });
 
-        
+        connection.on("CloseCall", (user) => {
+          console.log(`User ${user} has disconnect`)
+          this.state.peer.destroy();
+          this.setState({
+            receivingCall: false,
+            caller: "",
+            callerSignal: null,
+            callAccepted: false,
+            peer: {},
+          })
+        });
 
         await connection.start();
         console.log('started connection')
@@ -93,29 +119,20 @@ class App extends Component {
   }
 
   callPeer = (id) => {
+    this.setState({
+      targetUser: id
+    })
     const { stream, connection, yourID } = this.state;
-    const peer = new Peer({
+    const peer = new window.SimplePeer({
       initiator: true,
       trickle: false,
-      config: {
-        iceServers: [
-            {
-                urls: "stun:numb.viagenie.ca",
-                username: "sultan1640@gmail.com",
-                credential: "98376683"
-            },
-            {
-                urls: "turn:numb.viagenie.ca",
-                username: "sultan1640@gmail.com",
-                credential: "98376683"
-            }
-        ]
-    },
       stream: stream,
     });
 
+    this.setState({ peer: peer });
+
     peer.on("signal", data => {
-      connection.invoke("CallUser", id, data, yourID);
+      connection.invoke("CallUser", id, JSON.stringify(data), yourID);
     })
 
     peer.on("stream", stream => {
@@ -126,10 +143,11 @@ class App extends Component {
 
     connection.on("CallAccepted", (signal) => {
       this.setState({
-        callAccepted: true
+        callAccepted: true,
       });
       peer.signal(signal);
     })
+    
   }
 
   acceptCall = () => {
@@ -137,13 +155,16 @@ class App extends Component {
     this.setState({
       callAccepted: true
     });
-    const peer = new Peer({
+    const peer = new window.SimplePeer({
       initiator: false,
       trickle: false,
       stream: stream,
     });
+
+    this.setState({ peer: peer });
+
     peer.on("signal", data => {
-      connection.invoke("AcceptCall", caller, data);
+      connection.invoke("AcceptCall", caller, JSON.stringify(data));
     })
 
     peer.on("stream", stream => {
@@ -153,9 +174,24 @@ class App extends Component {
     peer.signal(callerSignal);
   }
 
+  closePeer = async () => {
+    const { peer, connection, caller, targetUser } = this.state;
+    peer.destroy();
+    this.setState({
+      receivingCall: false,
+      caller: "",
+      callerSignal: null,
+      callAccepted: false,
+      peer: {},
+    })
+    let toUser = caller.length > 0 ? caller : targetUser;
+    await connection.invoke("CloseCall", toUser);
+  }
+
   render() {  
     const { yourID, currentUser, users, stream, caller, callAccepted, receivingCall } = this.state;
-
+    console.log('user video ref', this.userVideo);
+    console.log('partner video ref', this.partnerVideo);
     return (
       <Container>
         Video call 
@@ -164,12 +200,12 @@ class App extends Component {
           { callAccepted && <Video playsInline ref={this.partnerVideo} autoPlay />}
         </Row>
         <Row>
-          {Object.keys(users).map(key => {
-            if (key === yourID) {
+          {users.map(item => {
+            if (item === yourID) {
               return null;
             }
             return (
-              <button onClick={() => this.callPeer(key)}>Call {key}</button>
+              <button key={item} onClick={() => this.callPeer(item)}>Call {item}</button>
             );
           })}
         </Row>
@@ -182,6 +218,7 @@ class App extends Component {
             </div>
           }
         </Row>
+        <button onClick={this.closePeer}>Close call</button>
       </Container>
     );
   }
