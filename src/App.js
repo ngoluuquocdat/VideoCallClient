@@ -46,9 +46,10 @@ class App extends Component {
   // baseUrl = "https://localhost:7218";
   baseUrl = "https://chat-service.somee.com";
 
-
   userVideo = React.createRef();
   partnerVideo = React.createRef();
+
+  ringtone = new Audio("./Assets/")
 
   componentDidMount = async() => {
     // connect to signalrtc hub
@@ -164,7 +165,8 @@ class App extends Component {
   acceptCall = () => {
     const { connection, stream, partner, partnerSignal } = this.state;
     this.setState({
-      callAccepted: true
+      callAccepted: true,
+      receivingCall: false
     });
     const peer = new window.SimplePeer({
       initiator: false,
@@ -298,6 +300,7 @@ class App extends Component {
                 <div className='btn-animation-outer'></div>
                 <button className='call-btn' ><BsTelephone /></button>
               </div>
+              <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop/>
             </div>
           }
         </Row>    
