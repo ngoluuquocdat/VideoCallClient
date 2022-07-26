@@ -4,6 +4,10 @@ import React, { Component } from 'react';
 import { SimplePeer } from 'simple-peer';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import styled from "styled-components";
+import { ImPhoneHangUp } from 'react-icons/im';
+import { BsCameraVideo, BsCameraVideoOff, BsTelephone } from 'react-icons/bs';
+import { TbMicrophoneOff, TbMicrophone, TbScreenShare, TbScreenShareOff } from 'react-icons/tb';
+import "./Styles/app.scss"
 
 const Container = styled.div`
   height: 100vh;
@@ -20,20 +24,9 @@ const Row = styled.div`
 const Video = styled.video`
   border: 1px solid blue;
   width: 50%;
-  height: 50%;
+  height: 80%;
 `;
 class App extends Component {
-
-  // state = {
-  //   yourID: "",
-  //   users: [],
-  //   stream: null,
-  //   receivingCall: false,
-  //   caller: "",
-  //   callerSignal: null,
-  //   callAccepted: false,
-  //   peer: {},
-  // }
 
   state = {
     yourID: "",
@@ -43,10 +36,16 @@ class App extends Component {
     partner: "",
     partnerSignal: null,
     callAccepted: false,
+    calling: false,
     peer: {},
+    cameraOn: true,
+    micOn: true,
+    screenShared: false
   }
 
-  baseUrl = "https://localhost:7218";
+  // baseUrl = "https://localhost:7218";
+  baseUrl = "https://chat-service.somee.com";
+
 
   userVideo = React.createRef();
   partnerVideo = React.createRef();
@@ -55,7 +54,7 @@ class App extends Component {
     // connect to signalrtc hub
     await this.startConnectionToHub();
     // get webcam
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
+    navigator.mediaDevices.getUserMedia({ video: false, audio: true }).then((stream) => {   
       this.setState(
         { stream: stream },
         () => {
@@ -107,6 +106,7 @@ class App extends Component {
             partner: "",
             partnerSignal: null,
             callAccepted: false,
+            calling: false,
             peer: {},
           })
         });
@@ -127,7 +127,8 @@ class App extends Component {
 
   callPeer = (id) => {
     this.setState({
-      partner: id
+      partner: id,
+      calling: true
     })
     const { stream, connection, yourID } = this.state;
     const peer = new window.SimplePeer({
@@ -187,48 +188,119 @@ class App extends Component {
   }
 
   closePeer = async () => {
-    const { peer, connection, caller, targetUser } = this.state;
+    const { peer, connection, partner } = this.state;
     peer.destroy();
     this.setState({
       receivingCall: false,
-      caller: "",
-      callerSignal: null,
+      partner: "",
+      partnerSignal: null,
       callAccepted: false,
+      calling: false,
       peer: {},
     })
-    let toUser = caller.length > 0 ? caller : targetUser;
-    await connection.invoke("CloseCall", toUser);
+    await connection.invoke("CloseCall", partner);
+  }
+
+  cameraToggle = () => {
+
+  }
+
+  micToggle = () => {
+    let { micOn, cameraOn, stream } = this.state;
+    const newMicOn = !micOn;
+    if(newMicOn) {
+      stream.getAudioTracks().forEach((audio_track) => audio_track.enabled = true);
+      console.log("Audio tracks:", stream.getAudioTracks())
+      this.setState(
+        { stream: stream, micOn: newMicOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          } 
+        }
+      );
+    } else {
+      stream.getAudioTracks().forEach((audio_track) => audio_track.enabled = false);
+      console.log("Audio tracks:", stream.getAudioTracks())
+      this.setState(
+        { stream: stream, micOn: newMicOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          } 
+        }
+      );
+    }
   }
 
   render() {  
-    const { yourID, currentUser, users, stream, partner, callAccepted, receivingCall } = this.state;
+    const { yourID, users, stream, partner, calling, callAccepted, receivingCall } = this.state;
+    const { cameraOn, micOn, screenShared } = this.state;
     return (
       <Container>
         Video call 
         <Row>
-          { stream && <Video playsInline muted ref={this.userVideo} autoPlay /> }
-          { callAccepted && <Video playsInline ref={this.partnerVideo} autoPlay />}
-        </Row>
-        <Row>
-          {users.map(item => {
-            if (item === yourID) {
-              return null;
-            }
-            return (
-              <button key={item} onClick={() => this.callPeer(item)}>Call {item}</button>
-            );
-          })}
-        </Row>
-        <Row>
+          <div className='video-wrapper'>
+            <video className='video-player' playsInline muted ref={this.userVideo} autoPlay /> 
+            <div className='video-call-controls'>
+              <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideoOff/> : <BsCameraVideo/>}</button>
+              <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophoneOff/> : <TbMicrophone/>}</button>
+              <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
+            </div>
+          </div>
           { 
-            receivingCall && 
-            <div>
-              <h1>{partner} is calling you</h1>
-              <button onClick={this.acceptCall}>Accept</button>
+            callAccepted && 
+            <div className='video-wrapper'>
+              <video className='video-player' playsInline ref={this.partnerVideo} autoPlay />
+            </div>
+          }
+          {
+            calling && !callAccepted &&
+            <div className='calling-placeholder'>
+              <div className='btn-wrapper calling' onClick={this.acceptCall}>        
+                <div className='btn-animation-inner'></div>
+                <div className='btn-animation-outer'></div>
+                <button className='call-btn' ><BsTelephone /></button>
+              </div>
+              <p className='calling-partner-name'>Calling {partner} ...</p>
             </div>
           }
         </Row>
-        <button onClick={this.closePeer}>Close call</button>
+        <Row>
+        {
+          callAccepted &&
+          <div className='btn-wrapper'>
+            <button className='hang-up-btn' onClick={this.closePeer}><ImPhoneHangUp /></button>
+          </div>
+        }
+        </Row>
+        {
+          !callAccepted && users.filter(user => user !== yourID).length > 0 &&
+          <Row>
+            Connected users:
+            {users.map(item => {
+              if (item === yourID) {
+                return null;
+              }
+              return (
+                <button className='call-btn1' key={item} onClick={() => this.callPeer(item)}><BsTelephone /> {item}</button>
+              );
+            })}
+          </Row>
+        }
+        <Row>
+          { 
+            receivingCall && !callAccepted && 
+            <div className='incoming-call-section'>
+              <h1>{partner} is calling you</h1>
+              <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
+                <div className='btn-animation-inner'></div>
+                <div className='btn-animation-outer'></div>
+                <button className='call-btn' ><BsTelephone /></button>
+              </div>
+            </div>
+          }
+        </Row>    
       </Container>
     );
   }
