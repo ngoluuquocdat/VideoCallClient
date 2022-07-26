@@ -49,13 +49,11 @@ class App extends Component {
   userVideo = React.createRef();
   partnerVideo = React.createRef();
 
-  ringtone = new Audio("./Assets/")
-
   componentDidMount = async() => {
     // connect to signalrtc hub
     await this.startConnectionToHub();
     // get webcam
-    navigator.mediaDevices.getUserMedia({ video: false, audio: true }).then((stream) => {   
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
       this.setState(
         { stream: stream },
         () => {
@@ -135,10 +133,29 @@ class App extends Component {
     const peer = new window.SimplePeer({
       initiator: true,
       trickle: false,
+      config: { 
+        iceServers: [
+          {
+            urls: "stun:openrelay.metered.ca:80",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+        ]  
+      },
       stream: stream,
     });
 
     this.setState({ peer: peer });
+
+    console.log("Peer", peer)
 
     peer.on("signal", data => {
       // send signaling data to other peer
@@ -171,6 +188,23 @@ class App extends Component {
     const peer = new window.SimplePeer({
       initiator: false,
       trickle: false,
+      config: { 
+        iceServers: [
+          {
+            urls: "stun:openrelay.metered.ca:80",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+        ] 
+      },
       stream: stream,
     });
 
@@ -217,11 +251,35 @@ class App extends Component {
   }
 
   cameraToggle = () => {
-
+    let { cameraOn, stream } = this.state;
+    const newCameraOn = !cameraOn;
+    if(newCameraOn) {
+      stream.getVideoTracks().forEach((video_track) => video_track.enabled = true);
+      console.log("Video tracks:", stream.getVideoTracks())
+      this.setState(
+        { stream: stream, cameraOn: newCameraOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          } 
+        }
+      );
+    } else {
+      stream.getVideoTracks().forEach((video_track) => video_track.enabled = false);
+      console.log("Video tracks:", stream.getVideoTracks())
+      this.setState(
+        { stream: stream, cameraOn: newCameraOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          } 
+        }
+      );
+    }
   }
 
   micToggle = () => {
-    let { micOn, cameraOn, stream } = this.state;
+    let { micOn, stream } = this.state;
     const newMicOn = !micOn;
     if(newMicOn) {
       stream.getAudioTracks().forEach((audio_track) => audio_track.enabled = true);
