@@ -199,7 +199,20 @@ class App extends Component {
       callAccepted: false,
       calling: false,
       peer: {},
-    })
+    });
+    await connection.invoke("CloseCall", partner);
+  }
+
+  rejectCall = async () => {
+    const { connection, partner } = this.state;
+    this.setState({
+      receivingCall: false,
+      partner: "",
+      partnerSignal: null,
+      callAccepted: false,
+      calling: false,
+      peer: {},
+    });
     await connection.invoke("CloseCall", partner);
   }
 
@@ -295,10 +308,15 @@ class App extends Component {
             receivingCall && !callAccepted && 
             <div className='incoming-call-section'>
               <h1>{partner} is calling you</h1>
-              <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
-                <div className='btn-animation-inner'></div>
-                <div className='btn-animation-outer'></div>
-                <button className='call-btn' ><BsTelephone /></button>
+              <div className='accept-reject-call'> 
+                <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
+                  <div className='btn-animation-inner'></div>
+                  <div className='btn-animation-outer'></div>
+                  <button className='call-btn' ><BsTelephone /></button>
+                </div>
+                <div className='btn-wrapper'>
+                  <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
+                </div>
               </div>
               <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop/>
             </div>
