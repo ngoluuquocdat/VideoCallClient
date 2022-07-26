@@ -24,13 +24,24 @@ const Video = styled.video`
 `;
 class App extends Component {
 
+  // state = {
+  //   yourID: "",
+  //   users: [],
+  //   stream: null,
+  //   receivingCall: false,
+  //   caller: "",
+  //   callerSignal: null,
+  //   callAccepted: false,
+  //   peer: {},
+  // }
+
   state = {
     yourID: "",
     users: [],
     stream: null,
     receivingCall: false,
-    caller: "",
-    callerSignal: null,
+    partner: "",
+    partnerSignal: null,
     callAccepted: false,
     peer: {},
   }
@@ -39,16 +50,12 @@ class App extends Component {
 
   userVideo = React.createRef();
   partnerVideo = React.createRef();
-  // socket = React.createRef();
 
   componentDidMount = async() => {
     // connect to signalrtc hub
     await this.startConnectionToHub();
     // get webcam
     navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
-      // if (this.userVideo.current) {
-      //   this.userVideo.current.srcObject = stream;
-      // } 
       this.setState(
         { stream: stream },
         () => {
@@ -67,8 +74,8 @@ class App extends Component {
     }
   }
 
-  startConnectionToHub = async (currentUser) => {
-    console.log("connect to RTC hub")
+  startConnectionToHub = async () => {
+    console.log("connect to SignalRTC hub")
     try {
         const connection = new HubConnectionBuilder()
         .withUrl(`${this.baseUrl}/signalrtc`)
@@ -83,12 +90,12 @@ class App extends Component {
           this.setState({ users: users });
         })
 
-        connection.on("Hey", (fromUser, signal) => {
+        connection.on("IncomingCall", (fromUser, signal) => {
           console.log("Hey on client invoked")
           this.setState({
             receivingCall: true,
-            caller: fromUser,
-            callerSignal: signal
+            partner: fromUser,
+            partnerSignal: signal
           });
         });
 
@@ -97,8 +104,8 @@ class App extends Component {
           this.state.peer.destroy();
           this.setState({
             receivingCall: false,
-            caller: "",
-            callerSignal: null,
+            partner: "",
+            partnerSignal: null,
             callAccepted: false,
             peer: {},
           })
@@ -120,7 +127,7 @@ class App extends Component {
 
   callPeer = (id) => {
     this.setState({
-      targetUser: id
+      partner: id
     })
     const { stream, connection, yourID } = this.state;
     const peer = new window.SimplePeer({
@@ -132,8 +139,11 @@ class App extends Component {
     this.setState({ peer: peer });
 
     peer.on("signal", data => {
+      // send signaling data to other peer
+      //console.log("On signal emitted, this peer want to send data to some peer")
+      console.log("on signal, data is: ", data);
       connection.invoke("CallUser", id, JSON.stringify(data), yourID);
-    })
+    });
 
     peer.on("stream", stream => {
       if (this.partnerVideo.current) {
@@ -151,7 +161,7 @@ class App extends Component {
   }
 
   acceptCall = () => {
-    const { connection, stream, caller, callerSignal } = this.state;
+    const { connection, stream, partner, partnerSignal } = this.state;
     this.setState({
       callAccepted: true
     });
@@ -164,14 +174,16 @@ class App extends Component {
     this.setState({ peer: peer });
 
     peer.on("signal", data => {
-      connection.invoke("AcceptCall", caller, JSON.stringify(data));
+      // send signaling data to other peer
+      console.log("on signal, data is: ", data);
+      connection.invoke("AcceptCall", partner, JSON.stringify(data));
     })
 
     peer.on("stream", stream => {
       this.partnerVideo.current.srcObject = stream;
     });
 
-    peer.signal(callerSignal);
+    peer.signal(partnerSignal);
   }
 
   closePeer = async () => {
@@ -189,9 +201,7 @@ class App extends Component {
   }
 
   render() {  
-    const { yourID, currentUser, users, stream, caller, callAccepted, receivingCall } = this.state;
-    console.log('user video ref', this.userVideo);
-    console.log('partner video ref', this.partnerVideo);
+    const { yourID, currentUser, users, stream, partner, callAccepted, receivingCall } = this.state;
     return (
       <Container>
         Video call 
@@ -213,7 +223,7 @@ class App extends Component {
           { 
             receivingCall && 
             <div>
-              <h1>{caller} is calling you</h1>
+              <h1>{partner} is calling you</h1>
               <button onClick={this.acceptCall}>Accept</button>
             </div>
           }
