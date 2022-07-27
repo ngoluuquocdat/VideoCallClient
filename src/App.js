@@ -30,6 +30,7 @@ class App extends Component {
 
   state = {
     yourID: "",
+    yourUserName: "",
     users: [],
     stream: null,
     receivingCall: false,
@@ -310,20 +311,19 @@ class App extends Component {
     const { yourID, users, stream, partner, calling, callAccepted, receivingCall } = this.state;
     const { cameraOn, micOn, screenShared } = this.state;
     return (
-      <Container>
-        Video call 
-        <Row>
-          <div className='video-wrapper'>
+      <div className='container'>
+        <div className='row'>
+          <div className='video-wrapper self'>
             <video className='video-player' playsInline muted ref={this.userVideo} autoPlay /> 
             <div className='video-call-controls'>
-              <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideoOff/> : <BsCameraVideo/>}</button>
-              <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophoneOff/> : <TbMicrophone/>}</button>
+              <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideo/> : <BsCameraVideoOff/>}</button>
+              <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophone/> : <TbMicrophoneOff/>}</button>
               <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
             </div>
           </div>
           { 
             callAccepted && 
-            <div className='video-wrapper'>
+            <div className='video-wrapper partner'>
               <video className='video-player' playsInline ref={this.partnerVideo} autoPlay />
             </div>
           }
@@ -338,49 +338,56 @@ class App extends Component {
               <p className='calling-partner-name'>Calling {partner} ...</p>
             </div>
           }
-        </Row>
-        <Row>
+        </div>
         {
           callAccepted &&
-          <div className='btn-wrapper'>
-            <button className='hang-up-btn' onClick={this.closePeer}><ImPhoneHangUp /></button>
+          <div className='row hang-up-wrapper'>
+            <div className='btn-wrapper'>
+              <button className='hang-up-btn' onClick={this.closePeer}><ImPhoneHangUp /></button>
+            </div>
           </div>
         }
-        </Row>
         {
-          !callAccepted && users.filter(user => user !== yourID).length > 0 &&
-          <Row>
+          !callAccepted && users.filter(user => user !== yourID).length > 0 && !receivingCall &&
+          <div className='row users-list-wrapper'>
             Connected users:
-            {users.map(item => {
-              if (item === yourID) {
-                return null;
-              }
-              return (
-                <button className='call-btn1' key={item} onClick={() => this.callPeer(item)}><BsTelephone /> {item}</button>
-              );
-            })}
-          </Row>
-        }
-        <Row>
-          { 
-            receivingCall && !callAccepted && 
-            <div className='incoming-call-section'>
-              <h1>{partner} is calling you</h1>
-              <div className='accept-reject-call'> 
-                <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
-                  <div className='btn-animation-inner'></div>
-                  <div className='btn-animation-outer'></div>
-                  <button className='call-btn' ><BsTelephone /></button>
-                </div>
-                <div className='btn-wrapper'>
-                  <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
-                </div>
+              <div className='users-list'>
+                {users.map(item => {
+                  if (item === yourID) {
+                    return null;
+                  }
+                  return (
+                    <button className='user-item' key={item} onClick={() => this.callPeer(item)}><BsTelephone /> {item}</button>
+                  );
+                })}
               </div>
-              <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop/>
-            </div>
-          }
-        </Row>    
-      </Container>
+          </div>
+        }
+        {
+          receivingCall && !callAccepted &&
+          <div className='row incoming-call-wrapper'>           
+              <div className='incoming-call-section'>
+                <h1>{partner} is calling you</h1>
+                <div className='accept-reject-call'> 
+                  <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
+                    <div className='btn-animation-inner'></div>
+                    <div className='btn-animation-outer'></div>
+                    <button className='call-btn' ><BsTelephone /></button>
+                  </div>
+                  <div className='btn-wrapper'>
+                    <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
+                  </div>
+                </div>
+                <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop/>
+              </div>
+          </div>  
+        }
+        <div className='video-call-controls mobile'>
+          <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideo/> : <BsCameraVideoOff/>}</button>
+          <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophone/> : <TbMicrophoneOff/>}</button>
+          <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
+        </div>  
+      </div>
     );
   }
 }
