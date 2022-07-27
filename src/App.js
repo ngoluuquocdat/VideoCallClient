@@ -3,34 +3,18 @@ import './App.css';
 import React, { Component } from 'react';
 import { SimplePeer } from 'simple-peer';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
-import styled from "styled-components";
+import { toast, ToastContainer } from 'react-toastify';
 import { ImPhoneHangUp } from 'react-icons/im';
 import { BsCameraVideo, BsCameraVideoOff, BsTelephone } from 'react-icons/bs';
 import { TbMicrophoneOff, TbMicrophone, TbScreenShare, TbScreenShareOff } from 'react-icons/tb';
+import 'react-toastify/dist/ReactToastify.css';
 import "./Styles/app.scss"
 
-const Container = styled.div`
-  height: 100vh;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-`;
-
-const Row = styled.div`
-  display: flex;
-  width: 100%;
-`;
-
-const Video = styled.video`
-  border: 1px solid blue;
-  width: 50%;
-  height: 80%;
-`;
 class App extends Component {
 
   state = {
     yourID: "",
-    yourUserName: "",
+    yourUserName: localStorage.getItem('user-name') ? localStorage.getItem('user-name') : "",
     users: [],
     stream: null,
     receivingCall: false,
@@ -38,7 +22,7 @@ class App extends Component {
     partnerSignal: null,
     callAccepted: false,
     calling: false,
-    peer: {},
+    peer: null,
     cameraOn: true,
     micOn: true,
     screenShared: false
@@ -51,19 +35,41 @@ class App extends Component {
   partnerVideo = React.createRef();
 
   componentDidMount = async() => {
-    // connect to signalrtc hub
-    await this.startConnectionToHub();
-    // get webcam
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
-      this.setState(
-        { stream: stream },
-        () => {
-          if (this.userVideo.current) {
-            this.userVideo.current.srcObject = stream;
-          } 
-        }
-      );
-    });
+    const yourUserName = this.state.yourUserName;
+    if(yourUserName.length > 0)
+    {
+      // connect to signalrtc hub
+      await this.startConnectionToHub(yourUserName, false);
+      // get webcam
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
+        this.setState(
+          { stream: stream },
+          () => {
+            if (this.userVideo.current) {
+              this.userVideo.current.srcObject = stream;
+            } 
+          }
+        );
+      });
+    }
+  }
+
+  componentDidUpdate = async(prevProps, prevState) => {
+    if(prevState.yourUserName.length === 0 && this.state.yourUserName.length > 0) {
+      // connect to signalrtc hub
+      await this.startConnectionToHub(this.state.yourUserName, true);
+      // get webcam
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {   
+        this.setState(
+          { stream: stream },
+          () => {
+            if (this.userVideo.current) {
+              this.userVideo.current.srcObject = stream;
+            } 
+          }
+        );
+      });
+    }
   }
 
   componentWillUnmount = () => {
@@ -73,7 +79,7 @@ class App extends Component {
     }
   }
 
-  startConnectionToHub = async () => {
+  startConnectionToHub = async (yourUserName, isNewlyConnection) => {
     console.log("connect to SignalRTC hub")
     try {
         const connection = new HubConnectionBuilder()
@@ -83,6 +89,12 @@ class App extends Component {
 
         connection.on("YourID", (id) => {
           this.setState({ yourID: id });
+        })
+
+        connection.on("UsernameExisted", () => {
+          toast.info("Username already existed.")
+          localStorage.removeItem("user-name");
+          this.setState({ yourUserName: "" });
         })
 
         connection.on("AllUsers", (users) => {
@@ -100,21 +112,23 @@ class App extends Component {
 
         connection.on("CloseCall", (user) => {
           console.log(`User ${user} has disconnect`)
-          this.state.peer.destroy();
+          if(this.state.peer) {
+            this.state.peer.destroy();
+          }
           this.setState({
             receivingCall: false,
             partner: "",
             partnerSignal: null,
             callAccepted: false,
             calling: false,
-            peer: {},
+            peer: null,
           })
         });
 
         await connection.start();
         console.log('started connection')
 
-        await connection.invoke("YourID");
+        await connection.invoke("ConnectToSignalRTC", yourUserName, isNewlyConnection);
 
         this.setState({
             connection: connection
@@ -125,12 +139,12 @@ class App extends Component {
     }
   }
 
-  callPeer = (id) => {
+  callPeer = (user) => {
     this.setState({
-      partner: id,
+      partner: user,
       calling: true
     })
-    const { stream, connection, yourID } = this.state;
+    const { stream, connection, yourUserName } = this.state;
     const peer = new window.SimplePeer({
       initiator: true,
       trickle: false,
@@ -162,7 +176,7 @@ class App extends Component {
       // send signaling data to other peer
       //console.log("On signal emitted, this peer want to send data to some peer")
       console.log("on signal, data is: ", data);
-      connection.invoke("CallUser", id, JSON.stringify(data), yourID);
+      connection.invoke("CallUser", user, JSON.stringify(data), yourUserName);
     });
 
     peer.on("stream", stream => {
@@ -226,14 +240,16 @@ class App extends Component {
 
   closePeer = async () => {
     const { peer, connection, partner } = this.state;
-    peer.destroy();
+    if(peer) {
+      peer.destroy();
+    }
     this.setState({
       receivingCall: false,
       partner: "",
       partnerSignal: null,
       callAccepted: false,
       calling: false,
-      peer: {},
+      peer: null,
     });
     await connection.invoke("CloseCall", partner);
   }
@@ -246,7 +262,7 @@ class App extends Component {
       partnerSignal: null,
       callAccepted: false,
       calling: false,
-      peer: {},
+      peer: null,
     });
     await connection.invoke("CloseCall", partner);
   }
@@ -308,86 +324,120 @@ class App extends Component {
   }
 
   render() {  
-    const { yourID, users, stream, partner, calling, callAccepted, receivingCall } = this.state;
+    const { yourID, users, partner, calling, callAccepted, receivingCall, yourUserName } = this.state;
+
     const { cameraOn, micOn, screenShared } = this.state;
     return (
-      <div className='container'>
-        <div className='row'>
-          <div className='video-wrapper self'>
-            <video className='video-player' playsInline muted ref={this.userVideo} autoPlay /> 
-            <div className='video-call-controls'>
-              <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideo/> : <BsCameraVideoOff/>}</button>
-              <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophone/> : <TbMicrophoneOff/>}</button>
-              <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
-            </div>
-          </div>
-          { 
-            callAccepted && 
-            <div className='video-wrapper partner'>
-              <video className='video-player' playsInline ref={this.partnerVideo} autoPlay />
-            </div>
-          }
-          {
-            calling && !callAccepted &&
-            <div className='calling-placeholder'>
-              <div className='btn-wrapper calling' onClick={this.acceptCall}>        
-                <div className='btn-animation-inner'></div>
-                <div className='btn-animation-outer'></div>
-                <button className='call-btn' ><BsTelephone /></button>
+      <>
+        <ToastContainer
+          position="top-right"
+          autoClose={2500}
+          hideProgressBar={false}
+          newestOnTop={false}
+          closeOnClick
+          rtl={false}
+        />
+        {
+          yourUserName.length > 0 ?
+          <div className='container'>
+            <div className='row'>
+              <div className='video-wrapper self'>
+                <video className='video-player' playsInline muted ref={this.userVideo} autoPlay /> 
+                <div className='video-call-controls'>
+                  <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideo/> : <BsCameraVideoOff/>}</button>
+                  <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophone/> : <TbMicrophoneOff/>}</button>
+                  <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
+                </div>
               </div>
-              <p className='calling-partner-name'>Calling {partner} ...</p>
-            </div>
-          }
-        </div>
-        {
-          callAccepted &&
-          <div className='row hang-up-wrapper'>
-            <div className='btn-wrapper'>
-              <button className='hang-up-btn' onClick={this.closePeer}><ImPhoneHangUp /></button>
-            </div>
-          </div>
-        }
-        {
-          !callAccepted && users.filter(user => user !== yourID).length > 0 && !receivingCall &&
-          <div className='row users-list-wrapper'>
-            Connected users:
-              <div className='users-list'>
-                {users.map(item => {
-                  if (item === yourID) {
-                    return null;
-                  }
-                  return (
-                    <button className='user-item' key={item} onClick={() => this.callPeer(item)}><BsTelephone /> {item}</button>
-                  );
-                })}
-              </div>
-          </div>
-        }
-        {
-          receivingCall && !callAccepted &&
-          <div className='row incoming-call-wrapper'>           
-              <div className='incoming-call-section'>
-                <h1>{partner} is calling you</h1>
-                <div className='accept-reject-call'> 
-                  <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
+              { 
+                callAccepted && 
+                <div className='video-wrapper partner'>
+                  <video className='video-player' playsInline ref={this.partnerVideo} autoPlay />
+                </div>
+              }
+              {
+                calling && !callAccepted &&
+                <div className='calling-placeholder'>
+                  <div className='btn-wrapper calling' onClick={this.acceptCall}>        
                     <div className='btn-animation-inner'></div>
                     <div className='btn-animation-outer'></div>
                     <button className='call-btn' ><BsTelephone /></button>
                   </div>
-                  <div className='btn-wrapper'>
+                  <p className='calling-partner-name'>Calling {partner} ...</p>
+                  <div className='btn-wrapper hang-up'>
                     <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
                   </div>
                 </div>
-                <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop/>
+              }
+            </div>
+            {
+              callAccepted &&
+              <div className='row hang-up-wrapper'>
+                <div className='btn-wrapper'>
+                  <button className='hang-up-btn' onClick={this.closePeer}><ImPhoneHangUp /></button>
+                </div>
               </div>
-          </div>  
+            }
+            {
+              !callAccepted && users.filter(user => user !== yourUserName).length > 0 && !receivingCall &&
+              <div className='row users-list-wrapper'>
+                Connected users:
+                  <div className='users-list'>
+                    {users.map(item => {
+                      if (item === yourUserName) {
+                        return null;
+                      }
+                      return (
+                        <button className='user-item' key={item} onClick={() => this.callPeer(item)}><BsTelephone /> {item}</button>
+                      );
+                    })}
+                  </div>
+              </div>
+            }
+            {
+              receivingCall && !callAccepted &&
+              <div className='row incoming-call-wrapper'>           
+                  <div className='incoming-call-section'>
+                    <h1>{partner} is calling you</h1>
+                    <div className='accept-reject-call'> 
+                      <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>        
+                        <div className='btn-animation-inner'></div>
+                        <div className='btn-animation-outer'></div>
+                        <button className='call-btn' ><BsTelephone /></button>
+                      </div>
+                      <div className='btn-wrapper'>
+                        <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
+                      </div>
+                    </div>
+                    <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop/>
+                  </div>
+              </div>  
+            }
+            <div className='video-call-controls mobile'>
+              <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideo/> : <BsCameraVideoOff/>}</button>
+              <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophone/> : <TbMicrophoneOff/>}</button>
+              <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
+            </div>  
+          </div>
+          : 
+          <div className='container username-input-wrapper'>
+            <div className='username-input-section'>
+              <h1>Provide your name</h1>
+              <input className='username-input' onChange={(event) => {this.setState({userNameInput: event.target.value})}}></input>
+              <button 
+              className='username-submit' 
+              onClick={() => {
+                this.setState({ yourUserName: this.state.userNameInput.trim() });
+                localStorage.setItem("user-name", this.state.userNameInput.trim());
+              }}
+              >
+                Join!
+              </button>
+            </div>
+            
+          </div>
         }
-        <div className='video-call-controls mobile'>
-          <button className='call-controls--btn' onClick={this.cameraToggle}>{ cameraOn ? <BsCameraVideo/> : <BsCameraVideoOff/>}</button>
-          <button className='call-controls--btn' onClick={this.micToggle}>{ micOn ? <TbMicrophone/> : <TbMicrophoneOff/>}</button>
-          <button className='call-controls--btn'>{ screenShared ? <TbScreenShareOff/> : <TbScreenShare/>}</button>
-        </div>  
-      </div>
+      </>
     );
   }
 }
