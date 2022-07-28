@@ -66,6 +66,26 @@
         height: 100%;
     }
 }
+.video-wrapper.screen-shared {
+    width: 20%;
+    position: absolute;
+    z-index: 2;
+    height: auto;
+}
+.video-wrapper.self.screen-shared {
+    left: 0;
+}
+.video-wrapper.partner.screen-shared {
+    right: 0;
+}
+.video-wrapper.screen-share-wrapper {
+    width: 100%;
+    margin: auto;
+    height: 100%;
+    padding: 10px;
+}   
+
+
 .video-call-controls {
     position: absolute;
     left: 50%;
