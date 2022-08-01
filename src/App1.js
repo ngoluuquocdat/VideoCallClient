@@ -1,213 +1,609 @@
 import logo from './logo.svg';
 import './App.css';
-import { Peer } from 'simple-peer';
+import React, { Component } from 'react';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { toast, ToastContainer } from 'react-toastify';
+import { ImPhoneHangUp } from 'react-icons/im';
+import { BsCameraVideo, BsCameraVideoOff, BsChevronCompactLeft, BsTelephone } from 'react-icons/bs';
+import { TbMicrophoneOff, TbMicrophone, TbScreenShare, TbScreenShareOff } from 'react-icons/tb';
+import 'react-toastify/dist/ReactToastify.css';
+import "./Styles/app.scss"
+import { ConsoleLogger } from '@microsoft/signalr/dist/esm/Utils';
 
-function App1() {
+class App extends Component {
 
   state = {
-    connection: {},
-    newPeer: { userName: '', connectionId: '' },
-    helloAnswer: { userName: '', connectionId: '' },
-    disconnectedPeer: { userName: '', connectionId: '' },
-    signalInfo: { user: '', signal: '' },
+    yourID: "",
+    yourUserName: localStorage.getItem('user-name') ? localStorage.getItem('user-name') : "",
     users: [],
-    stream: {}, // video stream from getUserMedia()
-    onSignalToSend: { id: '', data: '' },
-    onStream: { id: '', data: '' },
-    onConnect: { id: '', data: '' },
-    onData: { id:'', data: '' },
-    currentPeer: {},
-    currentUser: ''
+    stream: null,
+    receivingCall: false,
+    partner: "",
+    partnerSDP: null,
+    callAccepted: false,
+    calling: false,
+    peer: null,
+    cameraOn: true,
+    micOn: true,
+    yourScreenShared: false,
+    partnerScreenShared: false,
+    screen_stream: null,
+    tracks: []
   }
 
   baseUrl = "https://localhost:7218";
+  // baseUrl = "https://chat-service.somee.com";
 
-  startConnection = async (currentUser) => {
-    console.log("connect to RTC hub")
+  userVideo = React.createRef();
+  partnerVideo = React.createRef();
+  screenShareVideo = React.createRef();
+
+  componentDidMount = async () => {
+    const yourUserName = this.state.yourUserName;
+    if (yourUserName.length > 0) {
+      // connect to signalrtc hub
+      await this.startConnectionToHub(yourUserName, false);
+      // get user media
+      navigator.mediaDevices.getUserMedia({ video: false, audio: true }).then((stream) => {
+        this.setState(
+          { stream: stream, tracks: stream.getTracks() },
+          () => {
+            if (this.userVideo.current) {
+              this.userVideo.current.srcObject = stream;
+            }
+          }
+        );
+      });
+    }
+  }
+
+  componentDidUpdate = async (prevProps, prevState) => {
+    if (prevState.yourUserName.length === 0 && this.state.yourUserName.length > 0) {
+      // connect to signalrtc hub
+      await this.startConnectionToHub(this.state.yourUserName, true);
+      // get user media
+      navigator.mediaDevices.getUserMedia({ video: false, audio: true }).then((stream) => {
+        this.setState(
+          { stream: stream, tracks: stream.getTracks() },
+          () => {
+            if (this.userVideo.current) {
+              this.userVideo.current.srcObject = stream;
+            }
+          }
+        );
+      });
+    }
+  }
+
+  componentWillUnmount = () => {
+    const peer = this.state.peer;
+    if (peer) {
+      this.closeCall();
+    }
+  }
+
+  startConnectionToHub = async (yourUserName, isNewlyConnection) => {
+    console.log("connect to SignalRTC hub")
     try {
-        const connection = new HubConnectionBuilder()
+      const connection = new HubConnectionBuilder()
         .withUrl(`${this.baseUrl}/signalrtc`)
         .configureLogging(LogLevel.Information)
         .build();
 
-        connection.on("NewUserArrived", (data) => {
-          this.setState({ newPeer: JSON.parse(data) });
-        })
+      connection.on("YourID", (id) => {
+        this.setState({ yourID: id });
+      })
 
-        connection.on("UserSaidHello", (data) => {
-          this.setState({ helloAnswer: JSON.parse(data) });
-        })
+      connection.on("UsernameExisted", () => {
+        toast.info("Username already existed.")
+        localStorage.removeItem("user-name");
+        this.setState({ yourUserName: "" });
+      })
 
-        connection.on("UserDisconnect", (data) => {
-          this.setState({ disconnectedPeer: JSON.parse(data) });
-        })
+      connection.on("AllUsers", (users) => {
+        this.setState({ users: users });
+      })
 
-        connection.on("SendSignal", (user, signal) => {
-          this.setState({ signalInfo: {user, signal} });
-        })
-
-        await connection.start();
-        console.log('started connection')
-
-        await connection.invoke("NewUser", currentUser);
-
+      connection.on("ReceiveOffer", async (fromUser, sdp) => {
+        console.log("Hey on client invoked")
         this.setState({
-            connection: connection
+          receivingCall: true,
+          partner: fromUser,
+          partnerSDP: sdp
         });
+        // if a peer is already connected, just re-create that peer without any accept step
+        const { peer, callAccepted } = this.state;
+        if (peer && callAccepted) {
+          const rtcSdp = new RTCSessionDescription(JSON.parse(sdp));
+          await peer.setRemoteDescription(rtcSdp).catch(this.reportError);
+          this.setState({
+            peer: peer
+          })
+        }
+      });
 
-    } catch(e) {
+      connection.on("ReceiveAnswer", this.handleReceiveAnswer);
+
+      connection.on("ReceiveICECandidate", this.handleNewICECandidateMsg);
+
+      connection.on("PartnerSharedScreen", () => {
+        this.setState({
+          partnerScreenShared: true
+        });
+      });
+
+      connection.on("CloseCall", (user) => {
+        console.log(`User ${user} has disconnect`)
+        const peer = this.state.peer;
+        if (this.state.peer) {
+          peer.ontrack = null;
+          peer.onremovetrack = null;
+          peer.onicecandidate = null;
+          peer.oniceconnectionstatechange = null;
+          peer.onsignalingstatechange = null;
+          peer.onicegatheringstatechange = null;
+          peer.onnegotiationneeded = null;
+        }
+        this.setState({
+          receivingCall: false,
+          partner: "",
+          partnerSignal: null,
+          callAccepted: false,
+          calling: false,
+          peer: null,
+        })
+      });
+
+      await connection.start();
+      console.log('started connection')
+
+      await connection.invoke("ConnectToSignalRTC", yourUserName, isNewlyConnection);
+
+      this.setState({
+        connection: connection
+      });
+
+    } catch (e) {
       console.log(e);
     }
   }
 
-  sendSignalToUser = async(signal, user) => {
-    const connection = this.state.connection;
-    try {
-      await connection.invoke("SendSignal", signal, user);
-    } catch(e) {
-      console.log(e);
-    }
-  }
-
-  sayHello = async(userName, newUser) => {
-    const connection = this.state.connection;
-    try {
-      await connection.invoke("HelloUser", userName, newUser);
-    } catch(e) {
-      console.log(e);
-    }
-  }
-
-  newUserJoin = (newUser) => {
-    // param user: { userName: '', connectionId: '' }
-    let users = [...this.state.users];
+  // handlers for signaling server events
+  handleReceiveAnswer = async (fromUser, sdp) => {
     this.setState({
-      users: [...users, newUser]
+      callAccepted: true
     });
-  }
+    let myPeer = this.state.peer;
+    const rtcSdp = new RTCSessionDescription(JSON.parse(sdp));
+    await myPeer.setRemoteDescription(rtcSdp).catch(this.reportError);
 
-  disconnectedUser = (user) => {
-    // param user: { userName: '', connectionId: '' }
-    let users = [...this.state.users];
-    users = users.filter(x => x.connectionId === user.connectionId);
+    console.log('peers connected, pair: ', myPeer.getTransceivers())
     this.setState({
-      users: users
-    });
-  }
-
-  createPeer = (stream, userId, initiator) => {
-    const peer = new Peer({ initiator, stream });
-
-    peer.on('signal', data => {
-      const stringData = JSON.stringify(data);
-      this.setState({ onSignalToSend: {id: userId, data: stringData} })
-    });
-
-    peer.on('stream', data => {
-      console.log('on stream', data);
-      this.setState({ onStream: {id: userId, data}})
-    });
-
-    peer.on('connect', () => {
-      this.setState({ onConnect: { id: userId, data: null } })
-    });
-
-    peer.on('data', data => {
-      this.setState({ onData: { id: userId, data } })
-    });
-
-    return peer;
-  }
-
-  signalPeer = (userId, signal, stream) => {
-    const signalObject = JSON.parse(signal);
-    let currentPeer = this.state.currentPeer;
-    if (currentPeer) {
-      currentPeer.signal(signalObject);
-    } else {
-      currentPeer = this.createPeer(stream, userId, false);
-      currentPeer.signal(signalObject);
-      this.setState({ currentPeer: currentPeer });
-    }
-  }
-
-  inputCurrentUser = (event) => {
-    this.setState({ currentUser: event.target.value })
-  }
-
-  saveUsername = async() => {
-    const currentUser = this.state.currentUser;
-    try {
-      await this.startConnection(currentUser);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      this.setState({ stream: stream });
-    } catch (error) {
-      console.error(`Can't join room, error ${error}`);
-    }
-  }
-
-  userClicked = (connectionId) => {
-    const peer = this.rtcService.createPeer(this.stream, connectionId, true);
-    this.setState({
-      currentPeer = peer
+      peer: myPeer
     })
   }
+  handleNewICECandidateMsg = async (fromUser, sdp) => {
+    let myPeer = this.state.peer;
+    if(myPeer) {
+      const candidate = new RTCIceCandidate(JSON.parse(sdp));
+      try {
+        await myPeer.addIceCandidate(candidate);
+        this.setState({peer: myPeer})
+      } catch (e) {
+        this.reportError(e);
+      }
+    }
+  }
+  // --- end of signaling handlers --- 
 
-  render() {  
-    const {currentUser, users} = this.state;
+  createPeerConnection = () => {
+    let myPeer = new RTCPeerConnection({
+      iceServers: [
+        {
+          urls: "stun:openrelay.metered.ca:80",
+        },
+        {
+          urls: "turn:openrelay.metered.ca:80",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+      ]
+    });
 
-    return (
+    // event listeners
+    // first three are required
+    myPeer.onicecandidate = this.handleICECandidateEvent; // fired when local ICE layer needs you to transmit an ICE candidate to the other peer
+    myPeer.ontrack = this.handleTrackEvent; // fired when new track is added to peer connection
+    myPeer.onnegotiationneeded = this.handleNegotiationNeededEvent; // fired when peer want to start the session negotiation process anew, create and send an offer to the callee
+    //myPeer.onremovetrack = this.handleRemoveTrack;
+    myPeer.oniceconnectionstatechange = this.handleICEConnectionStateChangeEvent; // sent by the ICE layer to let you know about changes to the state of the ICE connection, this can help you know when the connection has failed, or been lost. 
+    myPeer.onicegatheringstatechange = this.handleICEGatheringStateChangeEvent; // 
+    myPeer.onsignalingstatechange = this.handleSignalingStateChangeEvent;
 
+    return myPeer;
+  }
+
+  // event handlers for RTCPeerConnection
+  handleNegotiationNeededEvent = async () => {
+    let { connection, partner, yourUserName } = this.state;
+    let myPeer = this.state.peer;
+    try {
+      let offer = await myPeer.createOffer();
+      await myPeer.setLocalDescription(offer)
+      // send offer through signaling server
+      const rtcMessage = {
+        from: yourUserName,
+        target: partner,
+        type: "video-offer",
+        sdp: JSON.stringify(myPeer.localDescription)
+      }
+      console.log('send offer', rtcMessage)
+      await connection.invoke("SendOffer", rtcMessage);
+    } catch(e) {
+      this.reportError(e);
+    }
+
+    // myPeer.createOffer().then((offer) => {
+    //   return myPeer.setLocalDescription(offer);
+    // }).then(() => {
+    //   // invokes signaling server
+    //   const rtcMessage = {
+    //     from: yourUserName,
+    //     target: partner,
+    //     type: "video-offer",
+    //     sdp: myPeer.localDescription
+    //   }
+    //   connection.invoke("SendOffer", partner, JSON.stringify(data));
+    // }).catch(this.reportError);
+  }
+  handleICECandidateEvent = async(event) => {
+    if(event.candidate) {
+      const { connection, partner, yourUserName } = this.state;
+      // send candidate sdp through signaling server
+      const rtcMessage = {
+        from: yourUserName,
+        target: partner,
+        type: "new-ice-candidate",
+        sdp: JSON.stringify(event.candidate)
+      }
+      await connection.invoke("SendICECandidate", rtcMessage);
+    }
+  }
+  handleTrackEvent = (event) => {
+    console.log("receive track event", event);
+    console.log("ref track event", this.partnerVideo.current)
+    if(this.partnerVideo.current) {      
+      this.partnerVideo.current.srcObject = event.streams[0];
+    }
+  }
+
+  callPeer = (user) => {
+    const stream = this.state.stream;
+    this.setState({
+      partner: user,
+      calling: true
+    });
+
+    console.log('local stream in caller', stream);
+    console.log('local tracks in caller', stream.getTracks());
+
+    let myPeer = this.createPeerConnection();
+
+    // get user media
+    this.setState({
+      peer: myPeer
+    });
+
+    stream.getTracks().forEach((track) => myPeer.addTrack(track, stream));
+    //stream.getTracks().forEach(track => myPeer.addTransceiver(track, {streams: [stream]}));
+  }
+
+  acceptCall = async () => {
+    const { connection, partner, partnerSDP, yourUserName, stream } = this.state;
+    this.setState({
+      callAccepted: true,
+      receivingCall: false
+    });
+
+    let myPeer = this.createPeerConnection();
+
+    const rtcSdp = new RTCSessionDescription(JSON.parse(partnerSDP));
+
+    try {
+      await myPeer.setRemoteDescription(rtcSdp);
+
+      this.setState({
+        peer: myPeer
+      });
+
+      console.log('local stream in accept', stream);
+      console.log('local tracks in caller', stream.getTracks());
+
+      stream.getTracks().forEach((track) => myPeer.addTrack(track, stream));
+      //stream.getTracks().forEach(track => myPeer.addTransceiver(track, {streams: [stream]}));
+
+      // create answer
+      let answer = await myPeer.createAnswer();
+      await myPeer.setLocalDescription(answer);
+      // send answer through signaling server
+      const rtcMessage = {
+        from: yourUserName,
+        target: partner,
+        type: "video-answer",
+        sdp: JSON.stringify(myPeer.localDescription)
+      }
+      console.log('send answer', rtcMessage)
+      await connection.invoke("SendAnswer", rtcMessage);
+    } catch(e) {
+      this.handleGetUserMediaError(e);
+    }
+
+    this.setState({peer: myPeer});
+  }
+
+  handleGetUserMediaError = (error) => {
+    console.log("get user media error:", error)
+    switch(error.name) {
+      case "NotFoundError":
+        alert("Unable to open your call because no camera and/or microphone" +
+              "were found.");
+        break;
+      case "SecurityError":
+      case "PermissionDeniedError":
+        // Do nothing; this is the same as the user canceling the call.
+        break;
+      default:
+        toast.error(`Error opening your camera and/or microphone.`);
+        break;
+    }
   
-      <div className="App">
-        <div class="container-fluid">
-          <h1>SignalRTC</h1>
-          <div class="row">
-            <div class="col-5">
-              <div class="row">
-                <div class="col">
-                  <input onChange={this.inputCurrentUser} required placeholder="UserName" type="text"/>
-                </div>
-                <div class="col">
-                  <div class="btn-group" role="group" aria-label="button group">
-                    <button disabled={!currentUser} onClick={this.saveUsername} type="button"
-                      class="btn btn-sm btn-primary">Save</button>
+    this.closeCall();
+  }
+
+  closeCall = async () => {
+    const { peer, connection, partner } = this.state;
+    if (peer) {
+      peer.ontrack = null;
+      peer.onremovetrack = null;
+      peer.onicecandidate = null;
+      peer.oniceconnectionstatechange = null;
+      peer.onsignalingstatechange = null;
+      peer.onicegatheringstatechange = null;
+      peer.onnegotiationneeded = null;
+    }
+    this.setState({
+      receivingCall: false,
+      partner: "",
+      partnerSignal: null,
+      callAccepted: false,
+      calling: false,
+      peer: null,
+    });
+    await connection.invoke("CloseCall", partner);
+  }
+
+  rejectCall = async () => {
+    const { connection, partner } = this.state;
+    this.setState({
+      receivingCall: false,
+      partner: "",
+      partnerSignal: null,
+      callAccepted: false,
+      calling: false,
+      peer: null,
+    });
+    await connection.invoke("CloseCall", partner);
+  }
+
+  cameraToggle = () => {
+    let { cameraOn, stream } = this.state;
+    const newCameraOn = !cameraOn;
+    if (newCameraOn) {
+      stream.getVideoTracks().forEach((video_track) => video_track.enabled = true);
+      console.log("Video tracks:", stream.getVideoTracks())
+      this.setState(
+        { stream: stream, cameraOn: newCameraOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          }
+        }
+      );
+    } else {
+      stream.getVideoTracks().forEach((video_track) => video_track.enabled = false);
+      console.log("Video tracks:", stream.getVideoTracks())
+      this.setState(
+        { stream: stream, cameraOn: newCameraOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          }
+        }
+      );
+    }
+  }
+
+  micToggle = () => {
+    let { micOn, stream } = this.state;
+    const newMicOn = !micOn;
+    if (newMicOn) {
+      stream.getAudioTracks().forEach((audio_track) => audio_track.enabled = true);
+      console.log("Audio tracks:", stream.getAudioTracks())
+      this.setState(
+        { stream: stream, micOn: newMicOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          }
+        }
+      );
+    } else {
+      stream.getAudioTracks().forEach((audio_track) => audio_track.enabled = false);
+      this.setState(
+        { stream: stream, micOn: newMicOn },
+        () => {
+          if (this.userVideo.current) {
+            this.userVideo.current.srcObject = stream;
+          }
+        }
+      );
+    }
+  }
+
+  reportError = (e) => {
+    toast.error("Error occurs.");
+    console.log(`Error ${e.name}: ${e.message}, ${e.stack}`);
+  }
+
+  getCurrentTracks = () => {
+    console.log('current tracks:', this.state.stream.getTracks())
+  }
+
+  getCurrentTransceiver = () => {
+    console.log('current Transceivers: ', this.state.peer.getTransceivers())
+  }
+
+  getTrack = () => {
+    console.log('current remote peer tracks:', this.state.peer.getRemoteStreams()[0].getTracks());
+  }
+
+
+  render() {
+    const { yourID, users, partner, calling, callAccepted, receivingCall, yourUserName } = this.state;
+
+    const { cameraOn, micOn, yourScreenShared, partnerScreenShared } = this.state;
+    console.log("show video screen area", callAccepted && (yourScreenShared || partnerScreenShared))
+    return (
+      <>
+        <ToastContainer
+          position="top-right"
+          autoClose={2500}
+          hideProgressBar={false}
+          newestOnTop={false}
+          closeOnClick
+          rtl={false}
+        />
+        {
+          yourUserName.length > 0 ?
+            <div className='container'>
+              <div className='row'>
+                <div className={yourScreenShared || partnerScreenShared ? 'video-wrapper self screen-shared' : 'video-wrapper self'}>
+                  <video className='video-player' playsInline muted ref={this.userVideo} autoPlay />
+                  <div className='video-call-controls'>
+                    <button className='call-controls--btn' onClick={this.cameraToggle}>{cameraOn ? <BsCameraVideo /> : <BsCameraVideoOff />}</button>
+                    <button className='call-controls--btn' onClick={this.micToggle}>{micOn ? <TbMicrophone /> : <TbMicrophoneOff />}</button>
+                    <button className='call-controls--btn' onClick={this.shareScreen}>{yourScreenShared ? <TbScreenShareOff /> : <TbScreenShare />}</button>
                   </div>
                 </div>
+                {
+                  callAccepted &&
+                  <div className={yourScreenShared || partnerScreenShared ? 'video-wrapper partner screen-shared' : 'video-wrapper partner'}>
+                    <video className='video-player' playsInline ref={this.partnerVideo} autoPlay />
+                  </div>
+                }
+                {
+                  calling && !callAccepted &&
+                  <div className='calling-placeholder'>
+                    <div className='btn-wrapper calling' onClick={this.acceptCall}>
+                      <div className='btn-animation-inner'></div>
+                      <div className='btn-animation-outer'></div>
+                      <button className='call-btn' ><BsTelephone /></button>
+                    </div>
+                    <p className='calling-partner-name'>Calling {partner} ...</p>
+                    <div className='btn-wrapper hang-up'>
+                      <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
+                    </div>
+                  </div>
+                }
               </div>
-              <div class="row">
-                <div class="col">
-                <ul class="list-group mt-4">
-                  {
-                    users.map(item => {
+              {
+                callAccepted && 
+                (yourScreenShared || partnerScreenShared) && 
+                <div className='video-wrapper screen-share-wrapper'>
+                  <span style={{marginLeft: '50%'}}>{yourScreenShared ? "your screen" : `${partner}'s screen`}</span>
+                  <video className='video-player' playsInline ref={this.screenShareVideo} autoPlay />
+                </div>
+              }
+              {
+                callAccepted &&
+                <div className='row hang-up-wrapper'>
+                  <div className='btn-wrapper'>
+                    <button className='hang-up-btn' onClick={this.closeCall}><ImPhoneHangUp /></button>
+                  </div>
+                </div>
+              }
+              <button onClick={this.getCurrentTracks}>Current tracks</button>
+              <br></br>
+              <button onClick={this.getTrack}>Current Tracks in remote peer stream</button>
+              <br></br>
+              <button onClick={this.getCurrentTransceiver}>Current Tracks in remote peer stream</button>
+              {
+                !callAccepted && users.filter(user => user !== yourUserName).length > 0 && !receivingCall &&
+                <div className='row users-list-wrapper'>
+                  Connected users:
+                  <div className='users-list'>
+                    {users.map(item => {
+                      if (item === yourUserName) {
+                        return null;
+                      }
                       return (
-                        <li class="list-group-item" onClick={() => this.userClicked(item.connectionId)}>
-                          {item.userName}
-                        </li>
-                      )
-                    })
-                  }
-                  
-                </ul>
+                        <button className='user-item' key={item} onClick={() => this.callPeer(item)}><BsTelephone /> {item}</button>
+                      );
+                    })}
+                  </div>
                 </div>
+              }
+              {
+                receivingCall && !callAccepted &&
+                <div className='row incoming-call-wrapper'>
+                  <div className='incoming-call-section'>
+                    <h1>{partner} is calling you</h1>
+                    <div className='accept-reject-call'>
+                      <div className={receivingCall ? 'btn-wrapper ringing' : 'btn-wrapper'} onClick={this.acceptCall}>
+                        <div className='btn-animation-inner'></div>
+                        <div className='btn-animation-outer'></div>
+                        <button className='call-btn' ><BsTelephone /></button>
+                      </div>
+                      <div className='btn-wrapper'>
+                        <button className='hang-up-btn' onClick={this.rejectCall}><ImPhoneHangUp /></button>
+                      </div>
+                    </div>
+                    <audio src="https://res.cloudinary.com/quocdatcloudinary/video/upload/v1658822519/Cool_Ringtone_ujedrd.mp3" autoPlay loop />
+                  </div>
+                </div>
+              }
+              <div className='video-call-controls mobile'>
+                <button className='call-controls--btn' onClick={this.cameraToggle}>{cameraOn ? <BsCameraVideo /> : <BsCameraVideoOff />}</button>
+                <button className='call-controls--btn' onClick={this.micToggle}>{micOn ? <TbMicrophone /> : <TbMicrophoneOff />}</button>
+                {/* <button className='call-controls--btn' onClick={this.shareScreen}>{screenShared ? <TbScreenShareOff /> : <TbScreenShare />}</button> */}
               </div>
             </div>
-            <div class="col-7">
-              <div class="row">
-                <div class="col-8">
-                  {/* <input [(ngModel)]="dataString" required placeholder="Write a message" type="text"> */}
-                </div>
-                <div class="col-4">
-                  {/* <button (click)="sendMessage()" type="button" class="btn btn-sm btn-secondary">Send</button> */}
-                </div>
+            :
+            <div className='container username-input-wrapper'>
+              <div className='username-input-section'>
+                <h1>Provide your name</h1>
+                <input className='username-input' onChange={(event) => { this.setState({ userNameInput: event.target.value }) }}></input>
+                <button
+                  className='username-submit'
+                  onClick={() => {
+                    this.setState({ yourUserName: this.state.userNameInput.trim() });
+                    localStorage.setItem("user-name", this.state.userNameInput.trim());
+                  }}
+                >
+                  Join!
+                </button>
               </div>
+
             </div>
-          </div>
-        </div>
-      </div>
+        }
+      </>
     );
   }
 }
 
-export default App1;
+export default App;

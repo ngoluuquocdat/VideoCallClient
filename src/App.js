@@ -284,6 +284,7 @@ class App extends Component {
         this.screenShareVideo.current.srcObject = stream;
         console.log("screen stream received")
       } else {
+        console.log('on stream accept', this.partnerVideo.current)
         this.partnerVideo.current.srcObject = stream;
         console.log("video call stream received")
       }
@@ -472,7 +473,15 @@ class App extends Component {
             }
           });
       });
-    }
+  }
+
+  getCurrentTracks = () => {
+    console.log('current local tracks:', this.state.stream.getTracks())
+  }
+
+  getCurrentTransceiver = () => {
+    console.log('current Transceivers: ', this.state.peer._pc.getTransceivers())
+  }
 
   render() {
     const { yourID, users, partner, calling, callAccepted, receivingCall, yourUserName } = this.state;
@@ -538,6 +547,9 @@ class App extends Component {
                   </div>
                 </div>
               }
+                <button onClick={this.getCurrentTracks}>Current tracks</button>
+                <br></br>
+                <button onClick={this.getCurrentTransceiver}>Current Transceiver</button>
               {
                 !callAccepted && users.filter(user => user !== yourUserName).length > 0 && !receivingCall &&
                 <div className='row users-list-wrapper'>
