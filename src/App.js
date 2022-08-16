@@ -13,6 +13,8 @@ import { ConsoleLogger } from '@microsoft/signalr/dist/esm/Utils';
 
 class App extends Component {
 
+  game = "Valorant";
+
   state = {
     yourID: "",
     yourUserName: localStorage.getItem('user-name') ? localStorage.getItem('user-name') : "",
