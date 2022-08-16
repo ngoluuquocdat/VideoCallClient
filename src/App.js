@@ -13,7 +13,7 @@ import { ConsoleLogger } from '@microsoft/signalr/dist/esm/Utils';
 
 class App extends Component {
 
-  game = "Valorant";
+  game = "Valorant-LOL";
 
   state = {
     yourID: "",
